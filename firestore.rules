@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isTenant(tenantId) {
+      return isSignedIn() && request.auth.uid == tenantId;
+    }
+
+    // Connection validation
+    function isValidConnection(data) {
+      return data.tenantId is string &&
+             data.tenantId == request.auth.uid &&
+             data.name is string &&
+             data.name.size() > 0 &&
+             data.name.size() <= 100;
+    }
+
+    // Contact validation
+    function isValidContact(data) {
+      return data.tenantId is string &&
+             data.tenantId == request.auth.uid &&
+             data.connectionId is string &&
+             isValidId(data.connectionId) &&
+             data.name is string &&
+             data.name.size() > 0 &&
+             data.name.size() <= 120 &&
+             data.phone is string &&
+             data.phone.size() >= 6 &&
+             data.phone.size() <= 30;
+    }
+
+    // Message validation
+    function isValidMessage(data) {
+      return data.tenantId is string &&
+             data.tenantId == request.auth.uid &&
+             data.connectionId is string &&
+             isValidId(data.connectionId) &&
+             data.content is string &&
+             data.content.size() > 0 &&
+             data.content.size() <= 4000 &&
+             (data.status == 'agendada' || data.status == 'enviada') &&
+             data.recipientContactIds is list &&
+             data.recipientContactIds.size() > 0 &&
+             data.recipientContactIds.size() <= 1000;
+    }
+
+    // Connections collection (Root)
+    match /connections/{connectionId} {
+      allow get: if isTenant(existing().tenantId);
+      allow list: if isSignedIn() && resource.data.tenantId == request.auth.uid;
+      allow create: if isSignedIn() &&
+                       isValidId(connectionId) &&
+                       isTenant(incoming().tenantId) &&
+                       isValidConnection(incoming());
+      allow update: if isSignedIn() &&
+                       isValidId(connectionId) &&
+                       isTenant(existing().tenantId) &&
+                       incoming().tenantId == existing().tenantId &&
+                       isValidConnection(incoming());
+      allow delete: if isSignedIn() &&
+                       isValidId(connectionId) &&
+                       isTenant(existing().tenantId);
+    }
+
+    // Contacts collection (Root)
+    match /contacts/{contactId} {
+      allow get: if isTenant(existing().tenantId);
+      allow list: if isSignedIn() && resource.data.tenantId == request.auth.uid;
+      allow create: if isSignedIn() &&
+                       isValidId(contactId) &&
+                       isTenant(incoming().tenantId) &&
+                       isValidContact(incoming());
+      allow update: if isSignedIn() &&
+                       isValidId(contactId) &&
+                       isTenant(existing().tenantId) &&
+                       incoming().tenantId == existing().tenantId &&
+                       isValidContact(incoming());
+      allow delete: if isSignedIn() &&
+                       isValidId(contactId) &&
+                       isTenant(existing().tenantId);
+    }
+
+    // Messages collection (Root)
+    match /messages/{messageId} {
+      allow get: if isTenant(existing().tenantId);
+      allow list: if isSignedIn() && resource.data.tenantId == request.auth.uid;
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       isTenant(incoming().tenantId) &&
+                       isValidMessage(incoming());
+      allow update: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       isTenant(existing().tenantId) &&
+                       incoming().tenantId == existing().tenantId &&
+                       isValidMessage(incoming());
+      allow delete: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       isTenant(existing().tenantId);
+    }
+  }
+}
